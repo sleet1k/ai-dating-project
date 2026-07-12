@@ -1,8 +1,9 @@
 import asyncio
+from telethon.errors import MessageNotModifiedError
 from .base import BotEngine
 
 class BlurEngine(BotEngine):
-    """Движок для бота @blurrr_dating_bot — классические лайк/дизлайк"""
+    """Движок для бота @blurrr_dating_bot — взаимодействие через инлайн-кнопки"""
 
     @property
     def target_bot(self) -> str:
@@ -15,90 +16,89 @@ class BlurEngine(BotEngine):
         return "binary"
 
     async def start(self, client):
-        """Отправка стартовой команды боту для начала показа анкет"""
+        """Отправка команды боту для начала показа анкет (согласно реплай-кнопке)"""
         bot_entity = await client.get_entity(self.target_bot)
-        await client.send_message(bot_entity, "👀 Искать")
+        # На скрине пробела после эмодзи нет
+        await client.send_message(bot_entity, "👀Искать")
 
     async def fetch_profile(self, client) -> str:
-        """
-        Запрос текста собственной анкеты пользователя.
-        Возвращает текст анкеты или пустую строку если не удалось получить.
-        """
-        bot_entity = await client.get_entity(self.target_bot)
-        await client.send_message(bot_entity, "📋 Профиль")
-        await asyncio.sleep(4)
-        messages = await client.get_messages(bot_entity, limit=5)
-        for msg in messages:
-            if getattr(msg, 'sender_id', None) == bot_entity.id and getattr(msg, 'photo', None) and msg.text:
-                return msg.text
+        """Запрос текста собственной анкеты пользователя."""
+        try:
+            bot_entity = await client.get_entity(self.target_bot)
+            await client.send_message(bot_entity, "/profile")
+            await asyncio.sleep(4)
+            messages = await client.get_messages(bot_entity, limit=5)
+            for msg in messages:
+                if getattr(msg, 'sender_id', None) == bot_entity.id and getattr(msg, 'photo', None) and msg.text:
+                    profile_text = msg.text
+                    return profile_text
+        except Exception as e:
+            print(f"[BlurEngine] Ошибка в fetch_profile: {e}")
         return ""
 
     async def check_triggers(self, event, is_test: bool) -> str:
-        """
-        Определяет тип входящего сообщения от бота.
-        
-        Возвращает:
-            "limit"   — сработал лимит лайков
-            "ad"      — рекламное сообщение (Lovesta и т.д.)
-            "match"   — взаимный лайк / мэтч
-            "ignore"  — пустое/системное сообщение
-            "profile" — анкета для обработки VLM
-        """
+        """Определяет тип входящего сообщения от бота."""
         text_content = event.message.message or ""
-
-        # Проверка триггеров лимита
+        
+        # Проверка триггеров лимита и бустов
         if ("анкеты закончились" in text_content.lower()
                 or "лайков на сегодня" in text_content.lower()
-                or "лимит лайков" in text_content.lower()):
+                or "активируйте буст" in text_content.lower()
+                or "лимит" in text_content.lower()):
             return "limit"
 
-        # Проверка рекламных сообщений
-        if "Lovesta" in text_content or "премиум" in text_content.lower():
-            if event.message.buttons and not is_test:
+        # Проверка рекламы
+        if "lovesta" in text_content.lower() or "премиум" in text_content.lower():
+            if getattr(event.message, 'buttons', None) and not is_test:
                 try:
-                    # Пытаемся нажать "Ок" или первую кнопку для закрытия рекламы
                     await event.message.buttons[0][0].click()
+                    await asyncio.sleep(1)
                 except Exception:
                     pass
             return "ad"
 
         # Проверка мэтчей
-        if "взаимный лайк" in text_content.lower() or "симпатия" in text_content.lower():
+        if "взаимный лайк" in text_content.lower() or "симпатия" in text_content.lower() or "мэтч" in text_content.lower():
             return "match"
 
-        # Игнорируем пустые сообщения без медиа
-        if not text_content and not getattr(event.message, 'media', None):
-            return "ignore"
+        # ЖЕСТКАЯ ПРОВЕРКА НА АНКЕТУ:
+        # У анкеты ДОЛЖНО быть фото и ряд из 4-х инлайн кнопок: 🗑️, 💌, ❤️‍🔥, 💗
+        buttons = getattr(event.message, 'buttons', None)
+        if getattr(event.message, 'photo', None) and buttons and len(buttons) > 0 and len(buttons[0]) >= 4:
+            return "profile"
 
-        return "profile"
+        return "ignore"
 
     async def click_action(self, event, action: str):
         """
         Нажимает нужную кнопку в зависимости от вердикта VLM.
-        
-        Кнопки Blurrr: 🗑️ (дизлайк/скип), 📩 (суперлайк), 🔥 (лайк), 💗 (лав)
-        Для лайка нажимаем 🔥, для дизлайка нажимаем 🗑️.
+        Индексы кнопок по скрину:
+        0: 🗑️ (дизлайк)
+        1: 💌 (сообщение)
+        2: ❤️‍🔥 (суперлайк)
+        3: 💗 (обычный лайк)
         """
         buttons = getattr(event, 'buttons', getattr(event.message, 'buttons', None))
-        if not buttons:
+        if not buttons or not buttons[0]:
             return
 
-        if action == "like":
-            target_emojis = ["🔥", "💗"]
-        else:
-            target_emojis = ["🗑️", "🗑"]
-
-        for row in buttons:
-            for btn in row:
-                if any(em in btn.text for em in target_emojis):
-                    await btn.click()
-                    return
-
-        # Фолбэк по индексам
         try:
-            if action == "like" and len(buttons[0]) >= 3:
-                await buttons[0][2].click()
-            elif action == "dislike" and len(buttons[0]) >= 1:
+            if action == "like":
+                # Бьем четко по 4-й кнопке (индекс 3) для обычного лайка
+                if len(buttons[0]) >= 4:
+                    await buttons[0][3].click()
+                else:
+                    # Фолбэк, если кнопок внезапно стало меньше
+                    await buttons[0][-1].click()
+            else:
+                # Дизлайк — это всегда самая первая кнопка (индекс 0)
                 await buttons[0][0].click()
-        except Exception:
+                
+            # КРИТИЧНО: Задержка, чтобы Телеграм и бот успели схавать коллбек
+            await asyncio.sleep(1.5)
+            
+        except MessageNotModifiedError:
+            # Обычная история для телетона, игнорим
             pass
+        except Exception as e:
+            print(f"[BlurEngine] Ошибка при клике: {e}")

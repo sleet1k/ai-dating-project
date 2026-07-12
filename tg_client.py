@@ -8,15 +8,45 @@ import msvcrt
 from telethon import TelegramClient, events
 from engines import get_engine
 
-from config.settings import load_config, get_random_phrase
-from vlm_analyzer import init_client
+import argparse
+from config.settings import load_config, get_random_phrase, interactive_criteria_wizard
+from vlm_analyzer import init_client, load_and_translate_criteria
+
+# Парсинг аргументов командной строки
+parser = argparse.ArgumentParser(description="Автоматизация дейтинг-ботов в Telegram")
+parser.add_argument("--criteria-file", type=str, default="criteria.txt", help="Файл с пользовательскими критериями")
+parser.add_argument("-cc", "--configure-criteria", action="store_true", help="Запустить интерактивную настройку критериев")
+args = parser.parse_args()
+
+if args.configure_criteria:
+    interactive_criteria_wizard(args.criteria_file)
+    sys.exit(0)
+
+if not os.path.exists(args.criteria_file):
+    print(f"\n\033[93m[!] Файл {args.criteria_file} не найден. Запускаем мастер настройки...\033[0m")
+    interactive_criteria_wizard(args.criteria_file)
+
+# Автоматическая очистка history.md если файл переполнен
+history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+if os.path.exists(history_file):
+    try:
+        with open(history_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > 1500:
+            with open(history_file, "w", encoding="utf-8") as f:
+                f.write("# 📊 AI Dating Project — История вердиктов\n\n")
+            print("\033[92m[🧹] Автоматическая очистка: history.md был переполнен и успешно сброшен\033[0m")
+    except Exception as e:
+        print(f"\033[91m[-] Ошибка при проверке history.md: {e}\033[0m")
 
 # Загружаем конфигурацию из .env (или запускаем Setup Wizard если .env нет)
 config = load_config()
 
 # Инициализируем VLM-клиент с параметрами из конфига (.env)
-# Чтобы использовать удалённый API, добавь в .env: VLM_URL=... и VLM_KEY=...
 init_client(config["VLM_URL"], config["VLM_KEY"])
+
+# Загружаем и переводим критерии
+load_and_translate_criteria(args.criteria_file)
 
 # ───────────────────────────────────────────────
 # Настройки сервисов и скоростей
@@ -132,17 +162,17 @@ def show_anime_menu():
     menu = """
 \033[91m       /\\_/\\  
       ( •.• )    \033[95m █▀█ █▀▄ █▀█ 
-      ══█ █══    \033[95m █▀█ █▄▀ █▀▀ \033[90mby sleet1k\033[91m
-     (___★___)
-  ─────────────────────────────────────────────────────
-  \033[96m💡 Нашел жену? Поблагодари автора:\033[0m \033[94mTG: @sleet1k | GitHub: sleet1k\033[0m
-  ─────────────────────────────────────────────────────
+      ══█ █══    \033[95m █▀█ █▄▀ █▀▀ 
+      (___★___)
+\033[95m  ─────────────────────────────────────────────────────
+  \033[96m💡 Нашел жену? Поблагодари автора. GitHub: sleet1k    
+\033[95m  ─────────────────────────────────────────────────────
   \033[95m▸ 1.\033[0m Инициализировать VLM-анализ (Тест-режим)
   \033[95m▸ 2.\033[0m Запустить конвейер дейтинга (Боевой авто-режим)
   \033[95m▸ 3.\033[0m Статус / Тест записи истории
   \033[95m▸ 4.\033[0m Сбросить настройки (.env)
   \033[95m▸ 5.\033[0m Выйти из терминала
-  \033[91m─────────────────────────────────────────────────────\033[0m
+\033[95m  ─────────────────────────────────────────────────────\033[0m
 """
     print(menu)
 
@@ -151,10 +181,10 @@ def show_anime_menu():
 # Авто-запрос своей анкеты (отдельная сессия, ДО старта воркера)
 # ───────────────────────────────────────────────
 
-async def fetch_and_save_my_profile(engine):
+async def fetch_and_save_my_profile(client, engine):
     """
-    Запрашивает текст своей анкеты у активного сервиса в ОТДЕЛЬНОЙ короткой сессии.
-    Вызывается ДО запуска основного воркера, чтобы не засорять очередь событий.
+    Запрашивает текст своей анкеты у активного сервиса в текущей сессии.
+    Вызывается после регистрации слушателя, но до его разблокировки.
     Результат сохраняется в data/my_profile.json.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -162,15 +192,7 @@ async def fetch_and_save_my_profile(engine):
 
     print(f"\033[90m[*] Автозапрос своей анкеты у @{engine.target_bot}...\033[0m")
     try:
-        # Открываем отдельную короткую сессию специально для запроса профиля
-        client_tmp = TelegramClient(
-            os.path.join(script_dir, "data", "ai_agent_session"),
-            api_id=config["API_ID"],
-            api_hash=config["API_HASH"]
-        )
-        async with client_tmp:
-            profile_text = await engine.fetch_profile(client_tmp)
-
+        profile_text = await engine.fetch_profile(client)
         if profile_text:
             os.makedirs(os.path.dirname(profile_path), exist_ok=True)
             with open(profile_path, "w", encoding="utf-8") as f:
@@ -386,6 +408,8 @@ async def process_dating_bot(client, engine, is_test: bool, delay_range: tuple, 
 
         async def handler(event):
             """Хэндлер входящих сообщений от бота"""
+            if getattr(engine, 'is_fetching_profile', False):
+                return
             if getattr(event, 'sender_id', None) != bot_entity.id:
                 return
             if not hasattr(event, 'message') or not event.message:
@@ -426,7 +450,37 @@ async def process_dating_bot(client, engine, is_test: bool, delay_range: tuple, 
             await profile_queue.put(event)
 
         client.add_event_handler(handler, events.NewMessage(chats=bot_entity))
-        print("\033[93m[*] Конвейер запущен. Введите '0' + Enter для остановки.\033[0m")
+
+        # ── АВТОЗАПРОС ПРОФИЛЯ С БЛОКИРОВКОЙ СЛУШАТЕЛЯ ──
+        engine.is_fetching_profile = True
+
+        if "bibinto" in engine.target_bot.lower():
+            # Сначала сбрасываем старый возможный диалог в главное меню
+            bot_entity = await client.get_entity(engine.target_bot)
+            await client.send_message(bot_entity, "Назад")
+            await asyncio.sleep(1.0)
+
+        # Собираем профиль
+        await fetch_and_save_my_profile(client, engine)
+        # небольшая пауза, чтобы профиль успел сохраниться и обработаться
+        await asyncio.sleep(1.5)
+
+        engine.is_fetching_profile = False
+
+        # ── ОТПРАВКА КОМАНДЫ СТАРТА ПОИСКА ──
+        bot_entity = await client.get_entity(engine.target_bot)
+        if engine.target_bot == "leomatchbot":
+            await client.send_message(bot_entity, "1 🚀")
+        elif "bibinto" in engine.target_bot.lower():
+            # Сбрасываем контекст настроек профиля, выходим в меню и только потом жмем оценку
+            await client.send_message(bot_entity, "Назад")
+            await asyncio.sleep(1.0)
+            await client.send_message(bot_entity, "🚀Оценивать")
+        else:
+            # По умолчанию для Blur и всех остальных
+            await client.send_message(bot_entity, "👀Искать")
+
+        print("\033[93m[*] Конвейер запущен и готов принимать первую анкету!\033[0m")
 
         # Удерживаем сессию открытой — опрашиваем клавиши и событие лимита
         while not limit_reached_event.is_set():
@@ -485,11 +539,6 @@ async def main_flow():
             spd_choice = input("\033[95m Скорость ▸ \033[0m").strip()
             current_delay = SPEED_MODES.get(spd_choice, SPEED_MODES["2"])["delay"]
 
-            # ── АВТОЗАПРОС ПРОФИЛЯ (отдельная сессия, до старта воркера) ──
-            engine_tmp = get_engine(bot_keys[current_bot_idx])
-            await fetch_and_save_my_profile(engine_tmp)
-            print()
-
             # ── ОСНОВНАЯ СЕССИЯ ВОРКЕРА ──
             print(f"\033[90m[*] Инициализация сессии Telethon...\033[0m")
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -518,22 +567,6 @@ async def main_flow():
                             next_engine = get_engine(bot_keys[current_bot_idx])
                             print(f"\n\033[95m[🔄] Авто-переключение на @{next_engine.target_bot} через 5 сек...\033[0m")
                             await asyncio.sleep(5)
-                            # Запрашиваем свою анкету у нового сервиса — в отдельной сессии
-                            # (текущая сессия ещё открыта, поэтому используем временный клиент)
-                            try:
-                                tmp = TelegramClient(
-                                    os.path.join(script_dir, "data", "ai_agent_session"),
-                                    api_id=config["API_ID"],
-                                    api_hash=config["API_HASH"]
-                                )
-                                async with tmp:
-                                    await next_engine.fetch_profile(tmp)
-                                    # Результат автоматически сохраняется внутри fetch_profile
-                                    # Но нам нужен и сохранение — дублируем логику
-                                    print(f"\033[90m[*] Профиль у @{next_engine.target_bot} обновлён\033[0m")
-                                await next_engine.start(client)
-                            except Exception as sw_err:
-                                print(f"\033[91m[-] Ошибка при переключении: {sw_err}\033[0m")
                             continue
                         else:
                             print(f"\n\033[91m[❌] Все сервисы исчерпали лимиты!\033[0m")

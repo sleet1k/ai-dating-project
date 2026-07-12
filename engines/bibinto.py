@@ -20,10 +20,18 @@ class BibintoEngine(BotEngine):
         await client.send_message(bot_entity, "🚀 Оценивать")
 
     async def fetch_profile(self, client) -> str:
-        """
-        Для Бибинто команда /myprofile не используется: бот её не понимает.
-        Метод оставлен для совместимости с базовым классом.
-        """
+        """Запрос текста собственной анкеты пользователя."""
+        try:
+            bot_entity = await client.get_entity(self.target_bot)
+            await client.send_message(bot_entity, "👤Мой профиль")
+            await asyncio.sleep(4)
+            messages = await client.get_messages(bot_entity, limit=5)
+            for msg in messages:
+                if getattr(msg, 'sender_id', None) == bot_entity.id and getattr(msg, 'photo', None) and msg.text:
+                    profile_text = msg.text
+                    return profile_text
+        except Exception as e:
+            print(f"[BibintoEngine] Ошибка в fetch_profile: {e}")
         return ""
 
     async def check_triggers(self, event, is_test: bool) -> str:

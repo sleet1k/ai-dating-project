@@ -2,6 +2,10 @@ import json
 import base64
 import os
 from openai import AsyncOpenAI
+from deep_translator import GoogleTranslator
+
+# Глобальная переменная для хранения переведенных критериев
+translated_criteria_text = ""
 
 # Клиент инициализируется после загрузки конфига через init_client()
 # Дефолт — локальный LM Studio (на случай если init_client не вызван)
@@ -21,6 +25,30 @@ def init_client(base_url: str = "http://localhost:1234/v1", api_key: str = "lm-s
     global client
     client = AsyncOpenAI(base_url=base_url, api_key=api_key)
     print(f"\033[90m[VLM] Клиент инициализирован: {base_url}\033[0m")
+
+def load_and_translate_criteria(filepath: str = "criteria.txt"):
+    """Читает файл с критериями и переводит их на английский один раз при старте."""
+    global translated_criteria_text
+    
+    if not os.path.exists(filepath):
+        print(f"\033[93m[⚠️] Файл {filepath} не найден, использую пустые критерии.\033[0m")
+        translated_criteria_text = "No strict criteria."
+        return
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            raw_text = f.read().strip()
+            
+        if not raw_text:
+            translated_criteria_text = "No strict criteria."
+            return
+            
+        print(f"\033[90m[VLM] Перевод пользовательских критериев на английский...\033[0m")
+        translated_criteria_text = GoogleTranslator(source='auto', target='en').translate(raw_text)
+        print(f"\033[92m[🟢] Критерии успешно переведены и загружены!\033[0m")
+    except Exception as e:
+        print(f"\033[91m[❌] Ошибка при чтении/переводе {filepath}: {e}\033[0m")
+        translated_criteria_text = "No strict criteria due to translation error."
 
 def encode_image(image_path: str) -> str:
     """Кодирует локальное изображение в base64 строку для передачи в VLM"""
@@ -57,13 +85,10 @@ You are an advanced profile filtering agent for a dating application. Your task 
 MY PROFILE (context):
 "{my_profile}"
 
-CRITICAL REJECTION CRITERIA (Immediately output "skip" if any are met):
-1. AGE: Must be strictly between 16 and 19 years old. Reject if younger than 16 or older than 19.
-2. ETHNICITY/APPEARANCE: The user strictly prefers Slavic appearance and Slavic names. Score lower if Asian/Caucasian. Reject if entirely incompatible.
-3. TOXICITY: Reject ("skip") if the profile text contains:
-   - Aggression, passive-aggressive phrases.
-   - Demands or low-effort text.
-   - Suspicious advertising.
+USER PREFERENCES AND CRITERIA (Translated from user config):
+{translated_criteria_text}
+
+Analyze the provided profile based STRICTLY on the criteria above.
 
 SCORING RULES:
 - "skip": Toxic profile, age under 16, or blatant spam.
@@ -90,15 +115,11 @@ You are an advanced profile filtering agent for a dating application. Your task 
 MY PROFILE (context):
 "{my_profile}"
 
-CRITICAL REJECTION CRITERIA (Immediately output DISLIKE if any are met):
-1. AGE: Must be strictly between 16 and 19 years old. Reject if younger than 16 or older than 19.
-2. ETHNICITY/APPEARANCE: The user strictly prefers Slavic appearance and Slavic names. Reject immediately if the name or appearance is Asian, Caucasian, or non-Slavic.
-3. TOXICITY: Reject if the profile text contains:
-   - Aggression, passive-aggressive phrases ("don't write if...", "pass if...").
-   - Demands or low-effort text ("give me money", "entertain me", "banned, write first").
-   - Clichés, empty bios with only social links, or suspicious advertising.
+USER PREFERENCES AND CRITERIA (Translated from user config):
+{translated_criteria_text}
 
-If the profile satisfies ALL criteria above, output LIKE.
+Analyze the provided profile based STRICTLY on the criteria above.
+If the profile satisfies ALL criteria above, output LIKE. Otherwise, output DISLIKE.
 
 RESPONSE FORMAT:
 You must respond strictly in JSON format. Do not include any markdown formatting outside the JSON block.

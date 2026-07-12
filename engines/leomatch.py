@@ -15,13 +15,17 @@ class LeomatchEngine(BotEngine):
         await client.send_message(bot_entity, "1")
 
     async def fetch_profile(self, client) -> str:
-        bot_entity = await client.get_entity(self.target_bot)
-        await client.send_message(bot_entity, "/myprofile")
-        await asyncio.sleep(4)
-        messages = await client.get_messages(bot_entity, limit=5)
-        for msg in messages:
-            if getattr(msg, 'sender_id', None) == bot_entity.id and getattr(msg, 'photo', None) and msg.text:
-                return msg.text
+        try:
+            bot_entity = await client.get_entity(self.target_bot)
+            await client.send_message(bot_entity, "/myprofile")
+            await asyncio.sleep(4)
+            messages = await client.get_messages(bot_entity, limit=5)
+            for msg in messages:
+                if getattr(msg, 'sender_id', None) == bot_entity.id and getattr(msg, 'photo', None) and msg.text:
+                    profile_text = msg.text
+                    return profile_text
+        except Exception as e:
+            print(f"[LeomatchEngine] Ошибка в fetch_profile: {e}")
         return ""
 
     async def check_triggers(self, event, is_test: bool) -> str:
