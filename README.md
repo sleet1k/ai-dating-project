@@ -1,63 +1,25 @@
-# ⚡ AI Dating Project (ADP) — Autonomous VLM Agent
+# AI Dating Project
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/VLM-Qwen--3.5--9B-purple?style=for-the-badge" alt="VLM">
-  <img src="https://img.shields.io/badge/Framework-Telethon-orange?style=for-the-badge" alt="Telethon">
-  <img src="https://img.shields.io/badge/Speed-~2s_per_profile-green?style=for-the-badge" alt="Speed">
-</p>
+## Key Features
 
----
+- **Two‑level CLI menu** – quick start, intuitive settings, full removal of command‑line flags.
+- **Automatic GEMINI API key rotator** – seamless switch to the next key when a `429 (Resource Exhausted)` error occurs.
+- **AI‑generated criteria – "✨ Улучшить вкус"** – turn any plain‑language description into a structured VLM prompt.
+- **Interactive cache & history cleanup** – one‑click removal of `history.md` and downloaded images.
 
-### 📖 Описание
-
-Это полезная штуковина для избирательных людей в выборе партнёра/друга/просто собеседника. Она создана для тех, кто не хочет пальчиками тыкать да/нет и тратить время на просмотр пустых, однотипных и мусорных анкет, а хочет сразу смотреть мэтчи и переходить к общению. С ним попытайтесь справиться без автоматизации! 😉
-
----
-
-## 🚀 Что этот зверь умеет уже сейчас (Фичи)
-
-* **⚡ Молниеносный инференс:** Оптимизированный под капотом движок обрабатывает полный промпт, включая десериализацию картинок и контекст, всего за **~2 секунды**!
-* **👁️ Мультимодальный анализ (VLM):** Бот не просто читает текст анкеты, он «видит» скриншоты и фотографии профилей через зрение **Qwen 3.5 9B**, распознавая вайб, стиль, внешность и скрытые детали.
-* **🛡️ Интеллектуальный анти-фрод:** Жесткая фильтрация по возрасту, моментальный отсев рекламных аккаунтов, спама, токсичных описаний, ссылок на каналы и "поиска спонсоров".
-* **⚙️ Гибкая интеграция API:** Полная независимость от хардкода. Настраивай локально через LM Studio/Ollama или подключай удаленный сервер одной строчкой в конфиге.
-* **📊 Умное логирование:** Прозрачный CLI-вывод с цветовым разделением по баллам — отсеивает трэш в реальном времени и подсвечивает только перспективные анкеты.
-
----
-
-## 🛠️ Инструкция по сборке и запуску (Мануал)
-
-### Клонирование и зависимости
-
-Убедись, что у тебя установлен Python 3.10+.
-
-```bash
-git clone https://github.com/sleet1k/ai-dating-project
-cd ai-dating-project
-pip install -r requirements.txt
-```
-
-### Боевой запуск основного CLI-конвейера
+## Quick Start
 
 ```bash
 python tg_client.py
 ```
 
-## ⚙️ Автоматическая настройка (Первый запуск)
+No flags, arguments or configuration files are required – the script will create a default `criteria.txt` if it does not exist and will launch the **Setup Wizard** on the first run.
 
-🧙‍♂️ **Руками создавать `.env` не нужно!** При самом первом запуске проекта через `python tg_client.py` автоматически запустится интерактивный (Мастер настройки). Он сам пошагово спросит у тебя все необходимые доступы (API ID, API Hash, URL вашей VLM) и сгенерирует правильный конфигурационный файл среды.
+## Documentation
 
-## 🎯 Вектор развития (Планы)
+Further details can be found in the `docs/` directory:
+- **ARCHITECTURE.md** – high‑level overview of the CLI, `vlm_analyzer`, key rotator and Telethon integration.
+- **PROMPTS.md** – description of system prompts and the “Improve Taste” workflow.
+- **ROADMAP.md** – released features and future plans.
+- **CONTRIBUTING.md** – how you can help.
 
-| Фича | Статус | Описание |
-| :--- | :---: | :--- |
-| **🌐 Модуль Динамических Критериев** | 🔄 *В процессе* | Вынос всех требований в файл `criteria.txt` на русском языке + автоперевод промпта на лету через `deep-translator`. |
-| **🧠 Глубокое Промпт-Кэширование** | 📅 *В планах* | Настройка Context / KV Cache в `llama.cpp` для снижения оверхеда на системных инструкциях. |
-| **📊 Локальная база данных (SQLite)** | 📅 *В планах* | Интеграция БД для сохранения истории вердиктов, чтобы исключить повторную обработку. |
-| **🤖 Авто-реплай система** | 📅 *В планах* | Генерация ИИ-приветствия на основе анализа интересов профиля сразу после мэтча. |
-
----
-
-## 📜 Дисклеймер
-
-Проект создан исключительно в образовательных и научно-исследовательских целях для автоматизации рутины и изучения возможностей локальных VLM агентов. Используйте с умом.
