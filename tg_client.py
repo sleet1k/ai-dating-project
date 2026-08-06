@@ -8,36 +8,28 @@ import msvcrt
 from telethon import TelegramClient, events
 from engines import get_engine
 
-import argparse
 from config.settings import load_config, get_random_phrase, interactive_criteria_wizard
 from vlm_analyzer import init_client, load_and_translate_criteria
+import shutil
 
-# Парсинг аргументов командной строки
-parser = argparse.ArgumentParser(description="Автоматизация дейтинг-ботов в Telegram")
-parser.add_argument("--criteria-file", type=str, default="criteria.txt", help="Файл с пользовательскими критериями")
-parser.add_argument("-cc", "--configure-criteria", action="store_true", help="Запустить интерактивную настройку критериев")
-args = parser.parse_args()
+# Автоматическое создание criteria.txt если нет
+default_criteria = "criteria.txt"
+if not os.path.exists(default_criteria):
+    with open(default_criteria, "w", encoding="utf-8") as f:
+        f.write("Возраст: строго от 18 до 25 лет.\nВнешность: опрятный вид.\nКрасные флаги (сразу SKIP): агрессия, пустые анкеты.\nИнтересы: видеоигры, мемы.\n")
 
-if args.configure_criteria:
-    interactive_criteria_wizard(args.criteria_file)
-    sys.exit(0)
-
-if not os.path.exists(args.criteria_file):
-    print(f"\n\033[93m[!] Файл {args.criteria_file} не найден. Запускаем мастер настройки...\033[0m")
-    interactive_criteria_wizard(args.criteria_file)
-
-# Автоматическая очистка history.md если файл переполнен
-history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
-if os.path.exists(history_file):
-    try:
-        with open(history_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) > 1500:
-            with open(history_file, "w", encoding="utf-8") as f:
-                f.write("# 📊 AI Dating Project — История вердиктов\n\n")
-            print("\033[92m[🧹] Автоматическая очистка: history.md был переполнен и успешно сброшен\033[0m")
-    except Exception as e:
-        print(f"\033[91m[-] Ошибка при проверке history.md: {e}\033[0m")
+def auto_rotate_history():
+    history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) > 1500:
+                with open(history_file, "w", encoding="utf-8") as f:
+                    f.write("# 📊 AI Dating Project — История вердиктов\n\n")
+                print("\033[92m[🧹] Автоматическая очистка: history.md был переполнен и успешно сброшен\033[0m")
+        except Exception as e:
+            print(f"\033[91m[-] Ошибка при проверке history.md: {e}\033[0m")
 
 # Загружаем конфигурацию из .env (или запускаем Setup Wizard если .env нет)
 config = load_config()
@@ -46,7 +38,7 @@ config = load_config()
 init_client(config["VLM_URL"], config["VLM_KEY"])
 
 # Загружаем и переводим критерии
-load_and_translate_criteria(args.criteria_file)
+load_and_translate_criteria(default_criteria)
 
 # ───────────────────────────────────────────────
 # Настройки сервисов и скоростей
@@ -156,7 +148,7 @@ def write_history_log(
 # Отображение меню
 # ───────────────────────────────────────────────
 
-def show_anime_menu():
+def show_main_menu():
     """Отображает главное меню скрипта с анимешным котиком"""
     os.system('cls' if os.name == 'nt' else 'clear')
     current_model = config.get("PRIMARY_VLM_MODEL", "gemini-3.5-flash-lite")
@@ -169,13 +161,26 @@ def show_anime_menu():
   \033[96m💡 Нашел жену? Поблагодари автора. GitHub: sleet1k    
   \033[93mАктивная VLM: {current_model}\033[0m
 \033[95m  ─────────────────────────────────────────────────────
-  \033[95m▸ 1.\033[0m Инициализировать VLM-анализ (Тест-режим)
-  \033[95m▸ 2.\033[0m Запустить конвейер дейтинга (Боевой авто-режим)
-  \033[95m▸ 3.\033[0m Сменить активную VLM-модель (сейчас: {current_model})
-  \033[95m▸ 4.\033[0m Статус / Тест записи истории
-  \033[95m▸ 5.\033[0m Сбросить настройки (.env)
-  \033[95m▸ 6.\033[0m Выйти из терминала
+  \033[95m▸ 1.\033[0m 🚀 Запуск (Авто-режим)
+  \033[95m▸ 2.\033[0m ⚙️ Настройки
+  \033[95m▸ 0.\033[0m 🚪 Выход
 \033[95m  ─────────────────────────────────────────────────────\033[0m
+"""
+    print(menu)
+
+def show_settings_menu():
+    os.system('cls' if os.name == 'nt' else 'clear')
+    menu = f"""
+\033[95m  === ⚙️ НАСТРОЙКИ ===
+  ─────────────────────────────────────────────────────
+  \033[95m▸ 1.\033[0m 🎯 Настройка критериев отбора
+  \033[95m▸ 2.\033[0m 🧠 Сменить VLM-модель
+  \033[95m▸ 3.\033[0m 🔑 Управление GEMINI API ключами (Ротатор)
+  \033[95m▸ 4.\033[0m 🧹 Очистка истории и кеша
+  \033[95m▸ 5.\033[0m 🧪 Тестовый анализ анкеты
+  \033[95m▸ 6.\033[0m 🛠️ Перепройти Мастер настройки (Setup Wizard)
+  \033[95m▸ 0.\033[0m ⬅️ Назад в главное меню
+  ─────────────────────────────────────────────────────\033[0m
 """
     print(menu)
 
@@ -523,11 +528,12 @@ async def main_flow():
     os.makedirs(config.get("DOWNLOAD_DIR", os.path.join(script_dir, "data", "downloads")), exist_ok=True)
 
     while True:
-        show_anime_menu()
+        show_main_menu()
         choice = input("\033[95m Выберите пункт меню ▸ \033[0m").strip()
 
-        if choice == "1" or choice == "2":
-            is_test = (choice == "1")
+        if choice == "1":
+            auto_rotate_history()
+            is_test = False
 
             # Выбор начального сервиса
             print("\n\033[95m[?] Выберите начального бота:\033[0m")
@@ -563,7 +569,7 @@ async def main_flow():
 
                     os.system('cls' if os.name == 'nt' else 'clear')
                     print(f"\033[92m[🟢] ВОРКЕР АКТИВИРОВАН\033[0m")
-                    print(f"🎯 Бот: \033[96m@{engine.target_bot}\033[0m | Режим: \033[95m{'ТЕСТ' if is_test else 'БОЕВОЙ'}\033[0m")
+                    print(f"🎯 Бот: \033[96m@{engine.target_bot}\033[0m | Режим: \033[95mБОЕВОЙ\033[0m")
                     print(f"⏱️ Таймаут: \033[90m{current_delay[0]}-{current_delay[1]} сек\033[0m\n")
 
                     status = await process_dating_bot(client, engine, is_test, current_delay, service_name)
@@ -584,85 +590,178 @@ async def main_flow():
 
             input("\n\033[90mНажмите Enter для возврата в меню...\033[0m")
 
-        elif choice == "3":
-            # Сменить активную VLM-модель
-            print("\n\033[96mВыберите новую VLM-модель:\033[0m")
-            print("  [1] gemini-3.5-flash-lite (500 RPD / 15 RPM)")
-            print("  [2] gemini-3.1-flash-lite (500 RPD / 15 RPM)")
-            print("  [3] gemini-2.5-flash (20 RPD / 5 RPM)")
-            print("  [4] gemini-3.5-flash (20 RPD / 5 RPM)")
-            
-            m_choice = input("\033[96mВведите номер (1-4): \033[0m").strip()
-            models_map = {
-                "1": "gemini-3.5-flash-lite",
-                "2": "gemini-3.1-flash-lite",
-                "3": "gemini-2.5-flash",
-                "4": "gemini-3.5-flash"
-            }
-            if m_choice in models_map:
-                new_model = models_map[m_choice]
+        elif choice == "2":
+            while True:
+                show_settings_menu()
+                set_choice = input("\033[95m Настройки ▸ \033[0m").strip()
                 
-                # Update config in memory
-                config["PRIMARY_VLM_MODEL"] = new_model
-                os.environ["PRIMARY_VLM_MODEL"] = new_model
-                
-                # Update .env file
-                env_path = ".env"
-                if os.path.exists(env_path):
-                    with open(env_path, "r", encoding="utf-8") as f:
-                        lines = f.readlines()
-                    with open(env_path, "w", encoding="utf-8") as f:
-                        found = False
-                        for line in lines:
-                            if line.startswith("PRIMARY_VLM_MODEL="):
-                                f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
-                                found = True
+                if set_choice == "1":
+                    print("\n\033[95m[1] ✏️ Редактировать criteria.txt вручную\033[0m")
+                    print("\033[95m[2] ✨ Улучшить вкус (AI-адаптация)\033[0m")
+                    c_opt = input("\033[96mВыбор: \033[0m").strip()
+                    if c_opt == "1":
+                        interactive_criteria_wizard("criteria.txt")
+                        load_and_translate_criteria("criteria.txt")
+                    elif c_opt == "2":
+                        wish = input("\033[96mОпиши пожелания простыми словами: \033[0m").strip()
+                        if wish:
+                            print("\033[90m[*] Обращаюсь к AI...\033[0m")
+                            from google import genai
+                            from google.genai import types
+                            api_keys = [k.strip() for k in os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", "")).split(",") if k.strip()]
+                            if api_keys:
+                                temp_client = genai.Client(api_key=api_keys[0])
+                                try:
+                                    resp = temp_client.models.generate_content(
+                                        model="gemini-3.5-flash",
+                                        contents=wish,
+                                        config=types.GenerateContentConfig(
+                                            system_instruction="Преобразуй пользовательский список пожеланий к кандидату в четкие, структурированные критерии оценки для VLM на русском языке. Только текст критериев, без вступления."
+                                        )
+                                    )
+                                    print(f"\n\033[92m✨ Предложенные критерии:\n{resp.text}\033[0m")
+                                    if input("\n\033[96mСохранить? (y/n): \033[0m").strip().lower() == 'y':
+                                        with open("criteria.txt", "w", encoding="utf-8") as f:
+                                            f.write(resp.text)
+                                        load_and_translate_criteria("criteria.txt")
+                                except Exception as e:
+                                    print(f"\033[91m[-] Ошибка API: {e}\033[0m")
                             else:
-                                f.write(line)
-                        if not found:
-                            f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
-                else:
-                    with open(env_path, "w", encoding="utf-8") as f:
-                        f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
-                
-                print(f"\n\033[92m✅ Модель успешно изменена на {new_model}\033[0m")
-            else:
-                print(f"\n\033[91m❌ Неверный выбор!\033[0m")
-            
-            input("\n\033[90mНажмите Enter...\033[0m")
+                                print("\033[91m[-] Нет доступных API ключей.\033[0m")
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "2":
+                    print("\n\033[96mВыберите новую VLM-модель:\033[0m")
+                    print("  [1] gemini-3.5-flash-lite (500 RPD / 15 RPM)")
+                    print("  [2] gemini-3.1-flash-lite (500 RPD / 15 RPM)")
+                    print("  [3] gemini-2.5-flash (20 RPD / 5 RPM)")
+                    print("  [4] gemini-3.5-flash (20 RPD / 5 RPM)")
+                    
+                    m_choice = input("\033[96mВведите номер (1-4): \033[0m").strip()
+                    models_map = {
+                        "1": "gemini-3.5-flash-lite",
+                        "2": "gemini-3.1-flash-lite",
+                        "3": "gemini-2.5-flash",
+                        "4": "gemini-3.5-flash"
+                    }
+                    if m_choice in models_map:
+                        new_model = models_map[m_choice]
+                        config["PRIMARY_VLM_MODEL"] = new_model
+                        os.environ["PRIMARY_VLM_MODEL"] = new_model
+                        
+                        env_path = ".env"
+                        if os.path.exists(env_path):
+                            with open(env_path, "r", encoding="utf-8") as f:
+                                lines = f.readlines()
+                            with open(env_path, "w", encoding="utf-8") as f:
+                                found = False
+                                for line in lines:
+                                    if line.startswith("PRIMARY_VLM_MODEL="):
+                                        f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                                        found = True
+                                    else:
+                                        f.write(line)
+                                if not found:
+                                    f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                        else:
+                            with open(env_path, "w", encoding="utf-8") as f:
+                                f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                        
+                        print(f"\n\033[92m✅ Модель успешно изменена на {new_model}\033[0m")
+                    else:
+                        print(f"\n\033[91m❌ Неверный выбор!\033[0m")
+                    
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "3":
+                    keys_str = os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", "")).strip()
+                    api_keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+                    print("\n\033[95m=== 🔑 УПРАВЛЕНИЕ КЛЮЧАМИ ===\033[0m")
+                    for i, k in enumerate(api_keys):
+                        masked = k[:8] + "..." + k[-4:] if len(k) > 12 else "INVALID_KEY"
+                        print(f"  [{i+1}] {masked}")
+                    print("\n\033[95m[+] Добавить новый ключ? (введите ключ или Enter для отмены)\033[0m")
+                    new_key = input("\033[96mНовый ключ: \033[0m").strip()
+                    if new_key:
+                        api_keys.append(new_key)
+                        new_keys_str = ",".join(api_keys)
+                        os.environ["GEMINI_API_KEYS"] = new_keys_str
+                        config["GEMINI_API_KEYS"] = new_keys_str
+                        
+                        env_path = ".env"
+                        if os.path.exists(env_path):
+                            with open(env_path, "r", encoding="utf-8") as f:
+                                lines = f.readlines()
+                            with open(env_path, "w", encoding="utf-8") as f:
+                                found = False
+                                for line in lines:
+                                    if line.startswith("GEMINI_API_KEYS="):
+                                        f.write(f"GEMINI_API_KEYS={new_keys_str}\n")
+                                        found = True
+                                    else:
+                                        f.write(line)
+                                if not found:
+                                    f.write(f"GEMINI_API_KEYS={new_keys_str}\n")
+                        else:
+                            with open(env_path, "w", encoding="utf-8") as f:
+                                f.write(f"GEMINI_API_KEYS={new_keys_str}\n")
+                        print("\033[92m[🟢] Ключ успешно добавлен!\033[0m")
+                        init_client()
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "4":
+                    print("\n\033[96mЧто очистить?\033[0m")
+                    print("  [1] Очистить историю (history.md)")
+                    print("  [2] Очистить кеш картинок (data/downloads)")
+                    print("  [3] Очистить всё")
+                    c_choice = input("\033[96mВыбор: \033[0m").strip()
+                    
+                    history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+                    downloads_dir = config.get("DOWNLOAD_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "downloads"))
+                    
+                    if c_choice in ["1", "3"]:
+                        if os.path.exists(history_file):
+                            with open(history_file, "w", encoding="utf-8") as f:
+                                f.write("# 📊 AI Dating Project — История вердиктов\n\n")
+                            print("\033[92m[🟢] История очищена.\033[0m")
+                    
+                    if c_choice in ["2", "3"]:
+                        if os.path.exists(downloads_dir):
+                            shutil.rmtree(downloads_dir, ignore_errors=True)
+                            os.makedirs(downloads_dir, exist_ok=True)
+                            print("\033[92m[🟢] Кеш картинок очищен.\033[0m")
+                    
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "5":
+                    # Тест записи истории / тестовый анализ
+                    print("\n\033[90m[*] Тест записи history.md...\033[0m")
+                    write_history_log(
+                        service_name="ТЕСТ",
+                        action="like",
+                        reason="Тестовая запись для проверки работы истории",
+                        profile_text="Тестовая анкета\nИмя: Тест\nВозраст: 18",
+                        photo_path="",
+                        tg_message_raw="Тестовое сообщение из TG",
+                        script_response="тест-запись",
+                        terminal_log="Эта строка сгенерирована пунктом тестового анализа",
+                    )
+                    history_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+                    if os.path.exists(history_path):
+                        print(f"\033[92m[🟢] Запись успешна! Файл: {history_path}\033[0m")
+                    else:
+                        print(f"\033[91m[❌] Файл не создан: {history_path}\033[0m")
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "6":
+                    confirm = input("\033[91m[!] Сбросить .env и запустить Мастер настройки? (y/n): \033[0m").strip().lower()
+                    if confirm == 'y':
+                        if os.path.exists(".env"):
+                            os.remove(".env")
+                            print("\033[92m[🟢] .env удалён. Запускаем Setup Wizard...\033[0m")
+                            from config.settings import run_setup_wizard
+                            run_setup_wizard()
+                            config = load_config()
+                    input("\n\033[90mНажмите Enter...\033[0m")
+                elif set_choice == "0":
+                    break
 
-        elif choice == "4":
-            # Тест записи истории — убеждаемся что файл создаётся и пишется
-            print("\n\033[90m[*] Тест записи history.md...\033[0m")
-            write_history_log(
-                service_name="ТЕСТ",
-                action="like",
-                reason="Тестовая запись для проверки работы истории",
-                profile_text="Тестовая анкета\nИмя: Тест\nВозраст: 18",
-                photo_path="",
-                tg_message_raw="Тестовое сообщение из TG",
-                script_response="тест-запись",
-                terminal_log="Эта строка сгенерирована пунктом 4 меню",
-            )
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            history_path = os.path.join(script_dir, "data", "history.md")
-            if os.path.exists(history_path):
-                print(f"\033[92m[🟢] Запись успешна! Файл: {history_path}\033[0m")
-            else:
-                print(f"\033[91m[❌] Файл не создан: {history_path}\033[0m")
-            input("\n\033[90mНажмите Enter...\033[0m")
-
-        elif choice == "5":
-            # Сброс настроек .env и перезапуск Setup Wizard
-            confirm = input("\033[91m[!] Сбросить .env? (y/n): \033[0m").strip().lower()
-            if confirm == 'y':
-                if os.path.exists(".env"):
-                    os.remove(".env")
-                    print("\033[92m[🟢] .env удалён. Запускаем Setup Wizard...\033[0m")
-                    config = load_config()
-            input("\n\033[90mНажмите Enter...\033[0m")
-
-        elif choice == "6":
+        elif choice == "0":
             print("\n\033[91mВыход. До связи!\033[0m")
             sys.exit(0)
 

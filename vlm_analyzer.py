@@ -13,20 +13,27 @@ _my_profile_cache = None
 
 # Глобальный клиент VLM
 client = None
+api_keys = []
+current_key_idx = 0
 
 def init_client(base_url: str = None, api_key: str = None):
     """
     Инициализирует VLM-клиент Google GenAI.
-    Параметры base_url и api_key оставлены для обратной совместимости.
-    Ключ берется из переменной окружения GEMINI_API_KEY.
     """
-    global client
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_key:
-        print("\033[93m[⚠️] GEMINI_API_KEY не задан в переменных окружения!\033[0m")
+    global client, api_keys, current_key_idx
+    keys_str = os.getenv("GEMINI_API_KEYS", "").strip()
+    if keys_str:
+        api_keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+    else:
+        single_key = os.getenv("GEMINI_API_KEY", "").strip()
+        api_keys = [single_key] if single_key else []
         
-    client = genai.Client(api_key=gemini_key)
-    print(f"\033[90m[VLM] Клиент Google GenAI инициализирован\033[0m")
+    if not api_keys:
+        print("\033[93m[⚠️] GEMINI_API_KEYS не задан в переменных окружения!\033[0m")
+        return
+        
+    client = genai.Client(api_key=api_keys[current_key_idx])
+    print(f"\033[90m[VLM] Клиент Google GenAI инициализирован (Ключей: {len(api_keys)})\033[0m")
 
 def get_my_profile() -> str:
     """Загружает анкету пользователя один раз и кэширует ее."""
@@ -85,7 +92,7 @@ async def analyze_profile(text: str, image_path: str = None, mode: str = "binary
     
     Возвращает словарь {"action": ..., "reason": ...}
     """
-    global client
+    global client, api_keys, current_key_idx
     if client is None:
         init_client()
 
@@ -147,22 +154,33 @@ INCOMING PROFILE:
         except Exception as e:
             print(f"[-] Не удалось загрузить картинку: {e}")
 
-    try:
-        response = await client.aio.models.generate_content(
-            model=model_name,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.1,
-                response_mime_type="application/json"
+    # global moved to start of function
+    
+    while True:
+        try:
+            response = await client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json"
+                )
             )
-        )
-        content = response.text
-
-        # Встроенный JSON mode возвращает чистый JSON
-        return json.loads(content)
-    except Exception as e:
-        print(f"[-] Ошибка парсинга или запроса VLM: {e}")
-        # Безопасное значение по умолчанию в зависимости от режима
-        default_action = "skip" if mode == "score" else "dislike"
-        return {"action": default_action, "reason": "ошибка разбора ответа VLM"}
+            content = response.text
+            return json.loads(content)
+        except genai.errors.APIError as e:
+            if e.code == 429 or "429" in str(e):
+                if len(api_keys) > 1:
+                    masked_key = api_keys[current_key_idx][:8] + "..."
+                    print(f"\n\033[93m[⚠️] Ключ {masked_key} исчерпан (429), переключаюсь на следующий...\033[0m")
+                    current_key_idx = (current_key_idx + 1) % len(api_keys)
+                    client = genai.Client(api_key=api_keys[current_key_idx])
+                    continue
+            print(f"[-] Ошибка запроса VLM: {e}")
+            default_action = "skip" if mode == "score" else "dislike"
+            return {"action": default_action, "reason": f"Ошибка API: {e}"}
+        except Exception as e:
+            print(f"[-] Ошибка парсинга или запроса VLM: {e}")
+            default_action = "skip" if mode == "score" else "dislike"
+            return {"action": default_action, "reason": "ошибка разбора ответа VLM"}

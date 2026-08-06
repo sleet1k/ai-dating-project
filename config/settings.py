@@ -63,6 +63,10 @@ def load_config():
     download_dir = os.getenv("DOWNLOAD_DIR", os.getenv("DOWNLOAD_PATH", "data/downloads")).strip()
     
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_keys_str = os.getenv("GEMINI_API_KEYS", "").strip()
+    if not gemini_keys_str and gemini_key:
+        gemini_keys_str = gemini_key
+    
     primary_vlm_model = os.getenv("PRIMARY_VLM_MODEL", "gemini-3.5-flash-lite").strip()
     
     return {
@@ -73,6 +77,7 @@ def load_config():
         "HISTORY_PATH": "data/history.md",
         "PHRASES_PATH": PHRASES_PATH,
         "GEMINI_API_KEY": gemini_key,
+        "GEMINI_API_KEYS": gemini_keys_str,
         "PRIMARY_VLM_MODEL": primary_vlm_model,
         "VLM_KEY": gemini_key, # Для обратной совместимости
         "VLM_URL": "", # Для обратной совместимости
