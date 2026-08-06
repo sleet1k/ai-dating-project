@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Configuration and Secrets
+.env
+criteria.txt
+
+# Session and Database files
+*.session
+*.session-journal
+*.sqlite3
+*.db
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project Data and Media Cache
+data/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
+# OS Specific
+.DS_Store
+Thumbs.db
