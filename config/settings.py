@@ -3,8 +3,23 @@ import json
 import random
 from dotenv import load_dotenv
 
-ENV_PATH = ".env"
-PHRASES_PATH = "data/phrases.json"
+import sys
+import colorama
+
+# Устанавливаем универсальный путь для работы в скомпилированном .exe
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+PHRASES_PATH = os.path.join(BASE_DIR, "data", "phrases.json")
+
+# Инициализация ANSI-цветов для консоли Windows
+colorama.init()
+if sys.platform == 'win32':
+    import codecs
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 
 def run_setup_wizard():
     print("\n\033[95m=== 🛠️ МАСТЕР ПЕРВОЙ НАСТРОЙКИ (SETUP WIZARD) ===\033[0m")
@@ -45,7 +60,14 @@ def run_setup_wizard():
 
 def load_config():
     if not os.path.exists(ENV_PATH):
-        run_setup_wizard()
+        try:
+            run_setup_wizard()
+        except KeyboardInterrupt:
+            print("\n\033[91m[!] Настройка прервана. Выход...\033[0m")
+            sys.exit(1)
+        except Exception as e:
+            print(f"\n\033[91m[❌] Ошибка настройки: {e}\033[0m")
+            sys.exit(1)
 
     load_dotenv(ENV_PATH)
     
@@ -60,7 +82,10 @@ def load_config():
     api_hash = os.getenv("API_HASH", "").strip()
     
     # Читаем DOWNLOAD_DIR (или старый DOWNLOAD_PATH для безопасности)
-    download_dir = os.getenv("DOWNLOAD_DIR", os.getenv("DOWNLOAD_PATH", "data/downloads")).strip()
+    default_downloads = os.path.join(BASE_DIR, "data", "downloads")
+    download_dir = os.getenv("DOWNLOAD_DIR", os.getenv("DOWNLOAD_PATH", default_downloads)).strip()
+    if not os.path.isabs(download_dir):
+        download_dir = os.path.join(BASE_DIR, download_dir)
     
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_keys_str = os.getenv("GEMINI_API_KEYS", "").strip()
@@ -74,7 +99,7 @@ def load_config():
         "API_HASH": api_hash,
         "DOWNLOAD_DIR": download_dir,
         "DOWNLOAD_PATH": download_dir,
-        "HISTORY_PATH": "data/history.md",
+        "HISTORY_PATH": os.path.join(BASE_DIR, "data", "history.md"),
         "PHRASES_PATH": PHRASES_PATH,
         "GEMINI_API_KEY": gemini_key,
         "GEMINI_API_KEYS": gemini_keys_str,

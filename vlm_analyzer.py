@@ -1,9 +1,11 @@
 import json
 import base64
 import os
+import asyncio
 from google import genai
 from google.genai import types
 from deep_translator import GoogleTranslator
+from config.settings import BASE_DIR
 
 # Глобальная переменная для хранения переведенных критериев
 translated_criteria_text = ""
@@ -38,22 +40,29 @@ def init_client(base_url: str = None, api_key: str = None):
 def get_my_profile() -> str:
     """Загружает анкету пользователя один раз и кэширует ее."""
     global _my_profile_cache
-    if _my_profile_cache is None:
-        _my_profile_cache = "Анкета не загружена. Оценивай на общих основаниях."
-        profile_path = "data/my_profile.json"
-        if os.path.exists(profile_path):
-            try:
-                with open(profile_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    _my_profile_cache = data.get("profile_text", _my_profile_cache)
-            except Exception:
-                pass
+    if _my_profile_cache is not None:
+        return _my_profile_cache
+        
+    _my_profile_cache = "Анкета не загружена. Оценивай на общих основаниях."
+    profile_path = os.path.join(BASE_DIR, "data", "my_profile.json")
+    if os.path.exists(profile_path):
+        try:
+            with open(profile_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                _my_profile_cache = data.get("profile_text", _my_profile_cache)
+        except Exception:
+            pass
     return _my_profile_cache
 
-def load_and_translate_criteria(filepath: str = "criteria.txt"):
-    """Читает файл с критериями и переводит их на английский один раз при старте."""
+def load_and_translate_criteria(filepath: str = None):
+    """
+    Читает criteria.txt (или переданный файл), переводит его на английский и кэширует в памяти.
+    """
     global translated_criteria_text
     
+    if filepath is None:
+        filepath = os.path.join(BASE_DIR, "criteria.txt")
+        
     if not os.path.exists(filepath):
         print(f"\033[93m[⚠️] Файл {filepath} не найден, использую пустые критерии.\033[0m")
         translated_criteria_text = "No strict criteria."
@@ -156,7 +165,10 @@ INCOMING PROFILE:
 
     # global moved to start of function
     
-    while True:
+    max_attempts = 3
+    attempt = 0
+    while attempt < max_attempts:
+        attempt += 1
         try:
             response = await client.aio.models.generate_content(
                 model=model_name,
@@ -176,11 +188,28 @@ INCOMING PROFILE:
                     print(f"\n\033[93m[⚠️] Ключ {masked_key} исчерпан (429), переключаюсь на следующий...\033[0m")
                     current_key_idx = (current_key_idx + 1) % len(api_keys)
                     client = genai.Client(api_key=api_keys[current_key_idx])
+                    attempt -= 1 # Не считаем смену ключа за попытку
                     continue
-            print(f"[-] Ошибка запроса VLM: {e}")
-            default_action = "skip" if mode == "score" else "dislike"
-            return {"action": default_action, "reason": f"Ошибка API: {e}"}
+                else:
+                    print(f"[-] Ошибка 429 (Лимит исчерпан). Пауза 5 сек...")
+                    await asyncio.sleep(5)
+                    continue
+            elif e.code in [503, 500, 502, 504] or any(str(c) in str(e) for c in [503, 500, 502, 504]):
+                delay = 2 ** attempt
+                print(f"\033[93m[-] Ошибка сервера Gemini ({getattr(e, 'code', 'unknown')}). Попытка {attempt}/{max_attempts} через {delay} сек...\033[0m")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                print(f"[-] Ошибка запроса VLM: {e}")
+                break
         except Exception as e:
+            delay = 2 ** attempt
+            if "timeout" in str(e).lower() or "connection" in str(e).lower():
+                print(f"\033[93m[-] Таймаут сети. Попытка {attempt}/{max_attempts} через {delay} сек...\033[0m")
+                await asyncio.sleep(delay)
+                continue
             print(f"[-] Ошибка парсинга или запроса VLM: {e}")
-            default_action = "skip" if mode == "score" else "dislike"
-            return {"action": default_action, "reason": "ошибка разбора ответа VLM"}
+            break
+
+    default_action = "skip" if mode == "score" else "dislike"
+    return {"action": default_action, "reason": "ошибка после всех попыток запроса VLM"}
