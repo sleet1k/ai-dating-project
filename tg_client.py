@@ -159,19 +159,22 @@ def write_history_log(
 def show_anime_menu():
     """Отображает главное меню скрипта с анимешным котиком"""
     os.system('cls' if os.name == 'nt' else 'clear')
-    menu = """
+    current_model = config.get("PRIMARY_VLM_MODEL", "gemini-3.5-flash-lite")
+    menu = f"""
 \033[91m       /\\_/\\  
       ( •.• )    \033[95m █▀█ █▀▄ █▀█ 
       ══█ █══    \033[95m █▀█ █▄▀ █▀▀ 
       (___★___)
 \033[95m  ─────────────────────────────────────────────────────
   \033[96m💡 Нашел жену? Поблагодари автора. GitHub: sleet1k    
+  \033[93mАктивная VLM: {current_model}\033[0m
 \033[95m  ─────────────────────────────────────────────────────
   \033[95m▸ 1.\033[0m Инициализировать VLM-анализ (Тест-режим)
   \033[95m▸ 2.\033[0m Запустить конвейер дейтинга (Боевой авто-режим)
-  \033[95m▸ 3.\033[0m Статус / Тест записи истории
-  \033[95m▸ 4.\033[0m Сбросить настройки (.env)
-  \033[95m▸ 5.\033[0m Выйти из терминала
+  \033[95m▸ 3.\033[0m Сменить активную VLM-модель (сейчас: {current_model})
+  \033[95m▸ 4.\033[0m Статус / Тест записи истории
+  \033[95m▸ 5.\033[0m Сбросить настройки (.env)
+  \033[95m▸ 6.\033[0m Выйти из терминала
 \033[95m  ─────────────────────────────────────────────────────\033[0m
 """
     print(menu)
@@ -274,14 +277,14 @@ async def queue_worker(client, bot_entity, is_test: bool, delay_range: tuple, en
                 )
 
             # Отдаём анкету в VLM с режимом текущего сервиса
-            tlog("\033[95m[*] Ожидаю вердикт от VLM модели в LM Studio...\033[0m")
+            tlog("\033[95m[*] Ожидаю вердикт от Google Gemini VLM...\033[0m")
             default_action = "skip" if engine.vlm_mode == "score" else "dislike"
             try:
                 result = await analyze_profile(profile_text, photo_path, mode=engine.vlm_mode)
                 action = result.get("action", default_action)
                 reason = result.get("reason", "Причина не указана")
             except Exception as vlm_err:
-                tlog(f"\033[91m[-] Ошибка API LM Studio: {vlm_err}\033[0m")
+                tlog(f"\033[91m[-] Ошибка Google Gemini VLM: {vlm_err}\033[0m")
                 action = default_action
                 reason = f"Ошибка запроса к локальной модели: {vlm_err}"
                 error_log += f"VLM Error: {vlm_err}\n"
@@ -514,6 +517,11 @@ async def process_dating_bot(client, engine, is_test: bool, delay_range: tuple, 
 async def main_flow():
     """Главный цикл приложения: отображает меню и обрабатывает выбор пользователя."""
     global config
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(os.path.join(script_dir, "data"), exist_ok=True)
+    os.makedirs(config.get("DOWNLOAD_DIR", os.path.join(script_dir, "data", "downloads")), exist_ok=True)
+
     while True:
         show_anime_menu()
         choice = input("\033[95m Выберите пункт меню ▸ \033[0m").strip()
@@ -577,6 +585,53 @@ async def main_flow():
             input("\n\033[90mНажмите Enter для возврата в меню...\033[0m")
 
         elif choice == "3":
+            # Сменить активную VLM-модель
+            print("\n\033[96mВыберите новую VLM-модель:\033[0m")
+            print("  [1] gemini-3.5-flash-lite (500 RPD / 15 RPM)")
+            print("  [2] gemini-3.1-flash-lite (500 RPD / 15 RPM)")
+            print("  [3] gemini-2.5-flash (20 RPD / 5 RPM)")
+            print("  [4] gemini-3.5-flash (20 RPD / 5 RPM)")
+            
+            m_choice = input("\033[96mВведите номер (1-4): \033[0m").strip()
+            models_map = {
+                "1": "gemini-3.5-flash-lite",
+                "2": "gemini-3.1-flash-lite",
+                "3": "gemini-2.5-flash",
+                "4": "gemini-3.5-flash"
+            }
+            if m_choice in models_map:
+                new_model = models_map[m_choice]
+                
+                # Update config in memory
+                config["PRIMARY_VLM_MODEL"] = new_model
+                os.environ["PRIMARY_VLM_MODEL"] = new_model
+                
+                # Update .env file
+                env_path = ".env"
+                if os.path.exists(env_path):
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    with open(env_path, "w", encoding="utf-8") as f:
+                        found = False
+                        for line in lines:
+                            if line.startswith("PRIMARY_VLM_MODEL="):
+                                f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                                found = True
+                            else:
+                                f.write(line)
+                        if not found:
+                            f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                else:
+                    with open(env_path, "w", encoding="utf-8") as f:
+                        f.write(f"PRIMARY_VLM_MODEL={new_model}\n")
+                
+                print(f"\n\033[92m✅ Модель успешно изменена на {new_model}\033[0m")
+            else:
+                print(f"\n\033[91m❌ Неверный выбор!\033[0m")
+            
+            input("\n\033[90mНажмите Enter...\033[0m")
+
+        elif choice == "4":
             # Тест записи истории — убеждаемся что файл создаётся и пишется
             print("\n\033[90m[*] Тест записи history.md...\033[0m")
             write_history_log(
@@ -587,7 +642,7 @@ async def main_flow():
                 photo_path="",
                 tg_message_raw="Тестовое сообщение из TG",
                 script_response="тест-запись",
-                terminal_log="Эта строка сгенерирована пунктом 3 меню",
+                terminal_log="Эта строка сгенерирована пунктом 4 меню",
             )
             script_dir = os.path.dirname(os.path.abspath(__file__))
             history_path = os.path.join(script_dir, "data", "history.md")
@@ -597,7 +652,7 @@ async def main_flow():
                 print(f"\033[91m[❌] Файл не создан: {history_path}\033[0m")
             input("\n\033[90mНажмите Enter...\033[0m")
 
-        elif choice == "4":
+        elif choice == "5":
             # Сброс настроек .env и перезапуск Setup Wizard
             confirm = input("\033[91m[!] Сбросить .env? (y/n): \033[0m").strip().lower()
             if confirm == 'y':
@@ -607,7 +662,7 @@ async def main_flow():
                     config = load_config()
             input("\n\033[90mНажмите Enter...\033[0m")
 
-        elif choice == "5":
+        elif choice == "6":
             print("\n\033[91mВыход. До связи!\033[0m")
             sys.exit(0)
 

@@ -6,39 +6,76 @@ from dotenv import load_dotenv
 ENV_PATH = ".env"
 PHRASES_PATH = "data/phrases.json"
 
+def run_setup_wizard():
+    print("\n\033[95m=== 🛠️ МАСТЕР ПЕРВОЙ НАСТРОЙКИ (SETUP WIZARD) ===\033[0m")
+    print("\033[90mПривет! Похоже, ты запускаешь бота впервые. Давай всё настроим.\033[0m\n")
+    
+    api_id = input("\033[96m[1/4] Введите Telegram API_ID:\033[0m ").strip()
+    api_hash = input("\033[96m[2/4] Введите Telegram API_HASH:\033[0m ").strip()
+    
+    default_path = "data/downloads"
+    download_dir = input(f"\033[96m[3/4] Папка для фото анкет (Enter = {default_path}):\033[0m ").strip() or default_path
+    
+    gemini_key = input("\033[96m[4/5] Введите Google Gemini API Key:\033[0m ").strip()
+    
+    print("\n\033[96m[5/5] Выберите VLM-модель:\033[0m")
+    print("  [1] gemini-3.5-flash-lite (500 RPD / 15 RPM) — По умолчанию")
+    print("  [2] gemini-3.1-flash-lite (500 RPD / 15 RPM)")
+    print("  [3] gemini-2.5-flash (20 RPD / 5 RPM)")
+    print("  [4] gemini-3.5-flash (20 RPD / 5 RPM)")
+    
+    model_choice = input("\033[96mВведите номер (1-4, Enter = 1):\033[0m ").strip()
+    
+    models_map = {
+        "1": "gemini-3.5-flash-lite",
+        "2": "gemini-3.1-flash-lite",
+        "3": "gemini-2.5-flash",
+        "4": "gemini-3.5-flash"
+    }
+    
+    selected_model = models_map.get(model_choice, "gemini-3.5-flash-lite")
+        
+    with open(ENV_PATH, "w", encoding="utf-8") as f:
+        f.write(f"API_ID={api_id}\n")
+        f.write(f"API_HASH={api_hash}\n")
+        f.write(f"DOWNLOAD_DIR={download_dir}\n")
+        f.write(f"GEMINI_API_KEY={gemini_key}\n")
+        f.write(f"PRIMARY_VLM_MODEL={selected_model}\n")
+    print("\n\033[92m[🟢] Отлично! Настройки сохранены в .env\033[0m")
+
 def load_config():
     if not os.path.exists(ENV_PATH):
-        print("\n\033[95m=== 🛠️ МАСТЕР ПЕРВОЙ НАСТРОЙКИ (SETUP WIZARD) ===\033[0m")
-        print("\033[90mПривет! Похоже, ты запускаешь бота впервые. Давай всё настроим.\033[0m\n")
-        
-        api_id = input("\033[96m[1/5] Введите Telegram API_ID:\033[0m ").strip()
-        api_hash = input("\033[96m[2/5] Введите Telegram API_HASH:\033[0m ").strip()
-        
-        default_path = "data/downloads"
-        download_path = input(f"\033[96m[3/5] Папка для фото анкет (Enter = {default_path}):\033[0m ").strip() or default_path
-        
-        default_vlm_url = "http://localhost:1234/v1"
-        vlm_url = input(f"\033[96m[4/5] VLM API URL (Enter = {default_vlm_url}):\033[0m ").strip() or default_vlm_url
-        
-        default_vlm_key = "lm-studio"
-        vlm_key = input(f"\033[96m[5/5] VLM API KEY (Enter = {default_vlm_key}):\033[0m ").strip() or default_vlm_key
-            
-        with open(ENV_PATH, "w", encoding="utf-8") as f:
-            f.write(f"API_ID={api_id}\nAPI_HASH={api_hash}\nDOWNLOAD_PATH={download_path}\n")
-            f.write(f"VLM_URL={vlm_url}\nVLM_KEY={vlm_key}\n")
-        print("\n\033[92m[🟢] Отлично! Настройки сохранены в .env\033[0m")
+        run_setup_wizard()
 
     load_dotenv(ENV_PATH)
     
+    api_id_str = os.getenv("API_ID", "").strip()
+    if not api_id_str or not api_id_str.isdigit():
+        print("\n\033[93m[⚠️] Файл .env пуст или поврежден (API_ID не найден). Запускаем мастер настройки...\033[0m")
+        run_setup_wizard()
+        load_dotenv(ENV_PATH, override=True)
+        api_id_str = os.getenv("API_ID", "").strip()
+        
+    api_id = int(api_id_str) if api_id_str.isdigit() else 0
+    api_hash = os.getenv("API_HASH", "").strip()
+    
+    # Читаем DOWNLOAD_DIR (или старый DOWNLOAD_PATH для безопасности)
+    download_dir = os.getenv("DOWNLOAD_DIR", os.getenv("DOWNLOAD_PATH", "data/downloads")).strip()
+    
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    primary_vlm_model = os.getenv("PRIMARY_VLM_MODEL", "gemini-3.5-flash-lite").strip()
+    
     return {
-        "API_ID": int(os.getenv("API_ID").strip()),
-        "API_HASH": os.getenv("API_HASH").strip(),
-        "DOWNLOAD_PATH": os.getenv("DOWNLOAD_PATH", "data/downloads").strip(),
+        "API_ID": api_id,
+        "API_HASH": api_hash,
+        "DOWNLOAD_DIR": download_dir,
+        "DOWNLOAD_PATH": download_dir,
         "HISTORY_PATH": "data/history.md",
         "PHRASES_PATH": PHRASES_PATH,
-        # VLM настройки: дефолт — локальный LM Studio
-        "VLM_URL": os.getenv("VLM_URL", "http://localhost:1234/v1").strip(),
-        "VLM_KEY": os.getenv("VLM_KEY", "lm-studio").strip(),
+        "GEMINI_API_KEY": gemini_key,
+        "PRIMARY_VLM_MODEL": primary_vlm_model,
+        "VLM_KEY": gemini_key, # Для обратной совместимости
+        "VLM_URL": "", # Для обратной совместимости
     }
 
 def get_random_phrase(category):

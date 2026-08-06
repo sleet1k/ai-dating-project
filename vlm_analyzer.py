@@ -1,30 +1,47 @@
 import json
 import base64
 import os
-from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 from deep_translator import GoogleTranslator
 
 # Глобальная переменная для хранения переведенных критериев
 translated_criteria_text = ""
 
-# Клиент инициализируется после загрузки конфига через init_client()
-# Дефолт — локальный LM Studio (на случай если init_client не вызван)
-client = AsyncOpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+# Кэш для профиля
+_my_profile_cache = None
 
-def init_client(base_url: str = "http://localhost:1234/v1", api_key: str = "lm-studio"):
+# Глобальный клиент VLM
+client = None
+
+def init_client(base_url: str = None, api_key: str = None):
     """
-    Инициализирует VLM-клиент с заданными параметрами.
-    
-    Вызвать из tg_client.py перед запуском воркера:
-        from vlm_analyzer import init_client
-        init_client(config['VLM_URL'], config['VLM_KEY'])
-    Или добавить в .env:
-        VLM_URL=https://your-remote-server/v1
-        VLM_KEY=your-api-key
+    Инициализирует VLM-клиент Google GenAI.
+    Параметры base_url и api_key оставлены для обратной совместимости.
+    Ключ берется из переменной окружения GEMINI_API_KEY.
     """
     global client
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-    print(f"\033[90m[VLM] Клиент инициализирован: {base_url}\033[0m")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+        print("\033[93m[⚠️] GEMINI_API_KEY не задан в переменных окружения!\033[0m")
+        
+    client = genai.Client(api_key=gemini_key)
+    print(f"\033[90m[VLM] Клиент Google GenAI инициализирован\033[0m")
+
+def get_my_profile() -> str:
+    """Загружает анкету пользователя один раз и кэширует ее."""
+    global _my_profile_cache
+    if _my_profile_cache is None:
+        _my_profile_cache = "Анкета не загружена. Оценивай на общих основаниях."
+        profile_path = "data/my_profile.json"
+        if os.path.exists(profile_path):
+            try:
+                with open(profile_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    _my_profile_cache = data.get("profile_text", _my_profile_cache)
+            except Exception:
+                pass
+    return _my_profile_cache
 
 def load_and_translate_criteria(filepath: str = "criteria.txt"):
     """Читает файл с критериями и переводит их на английский один раз при старте."""
@@ -50,10 +67,12 @@ def load_and_translate_criteria(filepath: str = "criteria.txt"):
         print(f"\033[91m[❌] Ошибка при чтении/переводе {filepath}: {e}\033[0m")
         translated_criteria_text = "No strict criteria due to translation error."
 
-def encode_image(image_path: str) -> str:
-    """Кодирует локальное изображение в base64 строку для передачи в VLM"""
+def encode_image(image_path: str) -> types.Part:
+    """Кодирует локальное изображение как Part для Gemini"""
     with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+        img_bytes = image_file.read()
+    # Gemini автоматически определяет тип по mime_type, используем image/jpeg как базовый
+    return types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
 
 async def analyze_profile(text: str, image_path: str = None, mode: str = "binary") -> dict:
     """
@@ -66,29 +85,26 @@ async def analyze_profile(text: str, image_path: str = None, mode: str = "binary
     
     Возвращает словарь {"action": ..., "reason": ...}
     """
-    # Загружаем свою анкету для контекста VLM
-    my_profile = "Анкета не загружена. Оценивай на общих основаниях."
-    profile_path = "data/my_profile.json"
-    if os.path.exists(profile_path):
-        try:
-            with open(profile_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                my_profile = data.get("profile_text", my_profile)
-        except Exception:
-            pass
+    global client
+    if client is None:
+        init_client()
 
-    # Выбираем промпт в зависимости от режима бота
-    if mode == "score":
-        prompt = f"""
-You are an advanced profile filtering agent for a dating application. Your task is to analyze the provided screenshot/photo and the accompanying profile text based on strict user preferences.
+    my_profile = get_my_profile()
+    model_name = os.getenv("PRIMARY_VLM_MODEL", "gemini-3.5-flash-lite")
+
+    system_instruction = f"""Role: Strict dating profile evaluator.
+Rules: Evaluate target photo and bio based on user criteria and my_profile context.
+Output: Response MUST be a valid JSON object matching the requested schema. Reason MUST be concise (under 15 words).
 
 MY PROFILE (context):
 "{my_profile}"
 
 USER PREFERENCES AND CRITERIA (Translated from user config):
-{translated_criteria_text}
+{translated_criteria_text}"""
 
-Analyze the provided profile based STRICTLY on the criteria above.
+    # Выбираем промпт в зависимости от режима бота
+    if mode == "score":
+        prompt = f"""Analyze the provided profile based STRICTLY on the criteria above.
 
 SCORING RULES:
 - "skip": Toxic profile, age under 16, or blatant spam.
@@ -96,8 +112,7 @@ SCORING RULES:
 - "6" to "8": Normal profile, acceptable compatibility.
 - "9" to "10": Excellent profile, high compatibility.
 
-RESPONSE FORMAT:
-You must respond strictly in JSON format. Do not include any markdown formatting outside the JSON block.
+SCHEMA:
 {{
   "action": "7", 
   "reason": "Brief, clear explanation of your decision in RUSSIAN language"
@@ -109,20 +124,10 @@ INCOMING PROFILE:
 """
     else:
         # Режим binary — классический лайк/дизлайк
-        prompt = f"""
-You are an advanced profile filtering agent for a dating application. Your task is to analyze the provided screenshot/photo and the accompanying profile text based on strict user preferences.
-
-MY PROFILE (context):
-"{my_profile}"
-
-USER PREFERENCES AND CRITERIA (Translated from user config):
-{translated_criteria_text}
-
-Analyze the provided profile based STRICTLY on the criteria above.
+        prompt = f"""Analyze the provided profile based STRICTLY on the criteria above.
 If the profile satisfies ALL criteria above, output LIKE. Otherwise, output DISLIKE.
 
-RESPONSE FORMAT:
-You must respond strictly in JSON format. Do not include any markdown formatting outside the JSON block.
+SCHEMA:
 {{
   "action": "like",
   "reason": "Brief, clear explanation of your decision in RUSSIAN language"
@@ -133,40 +138,31 @@ INCOMING PROFILE:
 "{text}"
 """
 
-    # Формируем контент для мультимодальной модели (текст + фото)
-    content_list = [{"type": "text", "text": prompt}]
+    contents = [prompt]
 
     if image_path and os.path.exists(image_path):
         try:
-            base64_image = encode_image(image_path)
-            content_list.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-            })
+            image_part = encode_image(image_path)
+            contents.insert(0, image_part)
         except Exception as e:
-            print(f"[-] Не удалось закодировать картинку: {e}")
+            print(f"[-] Не удалось загрузить картинку: {e}")
 
-    content = ""
     try:
-        response = await client.chat.completions.create(
-            model="qwen3-vl-8b",
-            messages=[{"role": "user", "content": content_list}],
-            temperature=0.1
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.1,
+                response_mime_type="application/json"
+            )
         )
-        content = response.choices[0].message.content
+        content = response.text
 
-        # Извлекаем JSON из ответа модели
-        json_start = content.find('{')
-        json_end = content.rfind('}')
-        if json_start != -1 and json_end != -1 and json_end >= json_start:
-            json_str = content[json_start:json_end+1]
-            return json.loads(json_str)
-        else:
-            raise ValueError("Не найдены фигурные скобки JSON в ответе модели")
+        # Встроенный JSON mode возвращает чистый JSON
+        return json.loads(content)
     except Exception as e:
         print(f"[-] Ошибка парсинга или запроса VLM: {e}")
-        if content:
-            print(f"[-] Сырой ответ модели: {content}")
         # Безопасное значение по умолчанию в зависимости от режима
         default_action = "skip" if mode == "score" else "dislike"
         return {"action": default_action, "reason": "ошибка разбора ответа VLM"}
