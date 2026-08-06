@@ -37,3 +37,9 @@ data/
 # OS Specific
 .DS_Store
 Thumbs.db
+
+
+
+build/
+dist/
+*.spec

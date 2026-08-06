@@ -8,18 +8,18 @@ import msvcrt
 from telethon import TelegramClient, events
 from engines import get_engine
 
-from config.settings import load_config, get_random_phrase, interactive_criteria_wizard
+from config.settings import load_config, get_random_phrase, interactive_criteria_wizard, BASE_DIR
 from vlm_analyzer import init_client, load_and_translate_criteria
 import shutil
 
 # Автоматическое создание criteria.txt если нет
-default_criteria = "criteria.txt"
+default_criteria = os.path.join(BASE_DIR, "criteria.txt")
 if not os.path.exists(default_criteria):
     with open(default_criteria, "w", encoding="utf-8") as f:
         f.write("Возраст: строго от 18 до 25 лет.\nВнешность: опрятный вид.\nКрасные флаги (сразу SKIP): агрессия, пустые анкеты.\nИнтересы: видеоигры, мемы.\n")
 
 def auto_rotate_history():
-    history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+    history_file = os.path.join(BASE_DIR, "data", "history.md")
     if os.path.exists(history_file):
         try:
             with open(history_file, "r", encoding="utf-8") as f:
@@ -90,8 +90,7 @@ def write_history_log(
         error_log       — ошибки выполнения скрипта, если есть
     """
     # Используем абсолютный путь относительно папки скрипта, чтобы не зависеть от cwd
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    history_file = os.path.join(script_dir, "data", "history.md")
+    history_file = os.path.join(BASE_DIR, "data", "history.md")
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -163,6 +162,7 @@ def show_main_menu():
 \033[95m  ─────────────────────────────────────────────────────
   \033[95m▸ 1.\033[0m 🚀 Запуск (Авто-режим)
   \033[95m▸ 2.\033[0m ⚙️ Настройки
+  \033[95m▸ 3.\033[0m 📜 Просмотр истории анкет
   \033[95m▸ 0.\033[0m 🚪 Выход
 \033[95m  ─────────────────────────────────────────────────────\033[0m
 """
@@ -177,7 +177,7 @@ def show_settings_menu():
   \033[95m▸ 2.\033[0m 🧠 Сменить VLM-модель
   \033[95m▸ 3.\033[0m 🔑 Управление GEMINI API ключами (Ротатор)
   \033[95m▸ 4.\033[0m 🧹 Очистка истории и кеша
-  \033[95m▸ 5.\033[0m 🧪 Тестовый анализ анкеты
+  \033[95m▸ 5.\033[0m 🔍 Проверка доступа к файлу истории
   \033[95m▸ 6.\033[0m 🛠️ Перепройти Мастер настройки (Setup Wizard)
   \033[95m▸ 0.\033[0m ⬅️ Назад в главное меню
   ─────────────────────────────────────────────────────\033[0m
@@ -195,8 +195,8 @@ async def fetch_and_save_my_profile(client, engine):
     Вызывается после регистрации слушателя, но до его разблокировки.
     Результат сохраняется в data/my_profile.json.
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    profile_path = os.path.join(script_dir, "data", "my_profile.json")
+    # 1. Загрузка/кэширование my_profile.json
+    profile_path = os.path.join(BASE_DIR, "data", "my_profile.json")
 
     print(f"\033[90m[*] Автозапрос своей анкеты у @{engine.target_bot}...\033[0m")
     try:
@@ -223,8 +223,8 @@ async def queue_worker(client, bot_entity, is_test: bool, delay_range: tuple, en
     отдаёт в VLM и реагирует через движок текущего сервиса.
     """
     from vlm_analyzer import analyze_profile
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    download_dir = config.get("DOWNLOAD_PATH", os.path.join(script_dir, "data", "downloads"))
+    # Удаляем скачанный файл для экономии места
+    download_dir = config.get("DOWNLOAD_PATH", os.path.join(BASE_DIR, "data", "downloads"))
     os.makedirs(download_dir, exist_ok=True)
 
     while True:
@@ -519,13 +519,44 @@ async def process_dating_bot(client, engine, is_test: bool, delay_range: tuple, 
 # Главный цикл — меню
 # ───────────────────────────────────────────────
 
+def view_history_cli(num_entries=5):
+    """Выводит последние N записей из history.md в консоль."""
+    history_file = os.path.join(BASE_DIR, "data", "history.md")
+    if not os.path.exists(history_file):
+        print("\n\033[93mИстория пока пуста.\033[0m")
+        input("\n\033[90mНажмите Enter...\033[0m")
+        return
+
+    with open(history_file, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    entries = content.split("\n---")
+    # Отфильтруем заголовок и пустые строки
+    entries = [e for e in entries if e.strip() and "AI Dating Project — История вердиктов" not in e]
+    
+    if not entries:
+        print("\n\033[93mИстория пока пуста.\033[0m")
+        input("\n\033[90mНажмите Enter...\033[0m")
+        return
+
+    recent = entries[-num_entries:]
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print(f"\033[95m=== 📜 ПОСЛЕДНИЕ {len(recent)} АНКЕТ ИЗ ИСТОРИИ ===\033[0m\n")
+    
+    for entry in recent:
+        # Просто выводим кусок markdown в консоль
+        print(f"\033[90m---\033[0m{entry}")
+    
+    input("\n\033[90mНажмите Enter...\033[0m")
+
+
 async def main_flow():
     """Главный цикл приложения: отображает меню и обрабатывает выбор пользователя."""
     global config
     
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.makedirs(os.path.join(script_dir, "data"), exist_ok=True)
-    os.makedirs(config.get("DOWNLOAD_DIR", os.path.join(script_dir, "data", "downloads")), exist_ok=True)
+    # Создаем папку data/ если не существует, чтобы telethon не падал с ошибкой sqlite
+    os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
+    os.makedirs(config.get("DOWNLOAD_DIR", os.path.join(BASE_DIR, "data", "downloads")), exist_ok=True)
 
     while True:
         show_main_menu()
@@ -555,9 +586,8 @@ async def main_flow():
 
             # ── ОСНОВНАЯ СЕССИЯ ВОРКЕРА ──
             print(f"\033[90m[*] Инициализация сессии Telethon...\033[0m")
-            script_dir = os.path.dirname(os.path.abspath(__file__))
             client = TelegramClient(
-                os.path.join(script_dir, "data", "ai_agent_session"),
+                os.path.join(BASE_DIR, "data", "ai_agent_session"),
                 api_id=config["API_ID"],
                 api_hash=config["API_HASH"]
             )
@@ -600,8 +630,8 @@ async def main_flow():
                     print("\033[95m[2] ✨ Улучшить вкус (AI-адаптация)\033[0m")
                     c_opt = input("\033[96mВыбор: \033[0m").strip()
                     if c_opt == "1":
-                        interactive_criteria_wizard("criteria.txt")
-                        load_and_translate_criteria("criteria.txt")
+                        interactive_criteria_wizard(default_criteria)
+                        load_and_translate_criteria(default_criteria)
                     elif c_opt == "2":
                         wish = input("\033[96mОпиши пожелания простыми словами: \033[0m").strip()
                         if wish:
@@ -621,9 +651,9 @@ async def main_flow():
                                     )
                                     print(f"\n\033[92m✨ Предложенные критерии:\n{resp.text}\033[0m")
                                     if input("\n\033[96mСохранить? (y/n): \033[0m").strip().lower() == 'y':
-                                        with open("criteria.txt", "w", encoding="utf-8") as f:
-                                            f.write(resp.text)
-                                        load_and_translate_criteria("criteria.txt")
+                                        with open(default_criteria, "w", encoding="utf-8") as f:
+                                            f.write(resp.text.strip())
+                                        load_and_translate_criteria(default_criteria)
                                 except Exception as e:
                                     print(f"\033[91m[-] Ошибка API: {e}\033[0m")
                             else:
@@ -713,8 +743,8 @@ async def main_flow():
                     print("  [3] Очистить всё")
                     c_choice = input("\033[96mВыбор: \033[0m").strip()
                     
-                    history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
-                    downloads_dir = config.get("DOWNLOAD_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "downloads"))
+                    history_file = os.path.join(BASE_DIR, "data", "history.md")
+                    downloads_dir = config.get("DOWNLOAD_DIR", os.path.join(BASE_DIR, "data", "downloads"))
                     
                     if c_choice in ["1", "3"]:
                         if os.path.exists(history_file):
@@ -731,7 +761,7 @@ async def main_flow():
                     input("\n\033[90mНажмите Enter...\033[0m")
                 elif set_choice == "5":
                     # Тест записи истории / тестовый анализ
-                    print("\n\033[90m[*] Тест записи history.md...\033[0m")
+                    print("\n\033[90m[*] Проверка записи в history.md...\033[0m")
                     write_history_log(
                         service_name="ТЕСТ",
                         action="like",
@@ -742,7 +772,7 @@ async def main_flow():
                         script_response="тест-запись",
                         terminal_log="Эта строка сгенерирована пунктом тестового анализа",
                     )
-                    history_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "history.md")
+                    history_path = os.path.join(BASE_DIR, "data", "history.md")
                     if os.path.exists(history_path):
                         print(f"\033[92m[🟢] Запись успешна! Файл: {history_path}\033[0m")
                     else:
@@ -760,6 +790,9 @@ async def main_flow():
                     input("\n\033[90mНажмите Enter...\033[0m")
                 elif set_choice == "0":
                     break
+
+        elif choice == "3":
+            view_history_cli(5)
 
         elif choice == "0":
             print("\n\033[91mВыход. До связи!\033[0m")
